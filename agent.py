@@ -32,14 +32,18 @@ class RandomAgent(object):
     def __init__(self, action_space):
         self.action_space = action_space
         self.lastAction = 0
-        self.lastState = None
+        self.lastState = State(0,0)
         self.moves = []
         self.qValues = None
-        self.r = {0: 1, 1: -1000} # Reward
+        self.r = {0: 1, 1: -5} # Reward
         self.lr = 0.7
         self.discount = 1.0
 
     def act(self, observation, reward, done):
+
+       if reward > 0 or reward == -5:
+        self.updateQValues()
+
        # Player y at index 7
        playerY = observation['player_y']
 
@@ -66,6 +70,7 @@ class RandomAgent(object):
         self.lastAction = 1
         return 1
 
+
     def updateQValues(self):
         #Update Q Values from stored history
         previousMoves = list(reversed(self.moves))
@@ -81,11 +86,21 @@ class RandomAgent(object):
         # TODO:
         if t==1 or t==2:
             if (action == 0):
-                qvalues[prevState.i][prevState.j].qValueJump
+                self.qValues[prevState.i][prevState.j].qValueJump = (1- self.lr) * (self.qValues[prevState.i][prevState.j].qValueJump) + (self.lr) * ( self.r[1] + (self.discount) * max(self.qValues[state.i][state.j].qValueFall,self.qValues[state.i][state.j].qValueJump) )
             else:
-                qvalues[prevState.i][prevState.j].qValueFall
+                self.qValues[prevState.i][prevState.j].qValueFall = (1- self.lr) * (self.qValues[prevState.i][prevState.j].qValueFall) + (self.lr) * ( self.r[1] + (self.discount) * max(self.qValues[state.i][state.j].qValueFall,self.qValues[state.i][state.j].qValueJump))
+        else: 
+            if (action == 0):
+                self.qValues[prevState.i][prevState.j].qValueJump = (1- self.lr) * (self.qValues[prevState.i][prevState.j].qValueJump) + (self.lr) * ( self.r[0] + (self.discount) * max(self.qValues[state.i][state.j].qValueFall,self.qValues[state.i][state.j].qValueJump) )
+            else:
+                self.qValues[prevState.i][prevState.j].qValueFall = (1- self.lr) * (self.qValues[prevState.i][prevState.j].qValueFall) + (self.lr) * ( self.r[0] + (self.discount) * max(self.qValues[state.i][state.j].qValueFall,self.qValues[state.i][state.j].qValueJump))
+        
+        for row in self.qValues:
+            for cell in row:
+                if(cell.qValueFall != 0.0 or cell.qValueJump != 0.0):
+                    print str(cell.i) + ",,,,," + str(cell.j)
+                    print "[ Fall: "+str(cell.qValueFall)+", Jump: "+str(cell.qValueJump)+"]"       
 
-            self.qvalues[prevState.i][prevState.j] = (1- self.lr) * (self.qvalues[prevState.i][prevState.j]) + (self.lr) * ( self.r[1] + (self.discount)*max(self.qvalues[state]) )
 
 
 
