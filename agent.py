@@ -1,205 +1,150 @@
 import argparse
 import logging
 import sys
-import json
-import io
+import math
 import numpy as np
+import matplotlib
+matplotlib.use("TkAgg")
+
+from matplotlib import pyplot as plt
 
 import gym
 from gym import wrappers
 
 import gym_ple
 
-class State():
-    def __init__(self, i, j):
-        self.qValueFall = 0.0
-        self.qValueJump = 0.0
-        self.i = i+500
-        self.j = j
-    def getQValueFall():
-        return self.qValueFall
+class FlappyAgent(object):
 
-    def getQValueJump():
-        return self.qValueJump
-
-    def setQValueFall(val):
-        self.qValueFall = val
-
-    def setQValueJump(val):
-        self.qValueJump = val
-
-    def dump(self):
-        return {
-
-            'vDiff': self.i,
-            'hDiff': self.j,
-            'qFall': self.qValueFall,
-            'qJump': self.qValueJump
-
-                               }
-
-
-# The world's simplest agent!
-class RandomAgent(object):
     def __init__(self, action_space):
+
+    	#action space is {0,1} - flap / fall
         self.action_space = action_space
+        #keep track of the current and past state information
+        self.lastState = '0_0'
         self.lastAction = 0
-        self.lastState = State(0,0)
-        self.moves = []
-        self.qValues = None
-        self.r = {0: 200, 1: -1000, 2: 1} # Reward
+        self.currentState = '0_0'
+        #dictionary of q values
+        self.qValues = {self.lastState:[0.0,0.0]} #initalise with last state
+        #q learning variables
         self.lr = 0.7 # learning rate
         self.discount = 1.0
-        self.playerY = 0
+        self.currentPoints = 0
 
-    def act(self, observation, reward, done, isLearning):
+    def roundup(self,x):
+    	return int(math.ceil(x / 10.0)) * 10
 
-       # Player y at index 7
-       playerY = observation['player_y']
-       self.playerY = playerY
+    def act(self, observation, reward, done):
+		#reward space is {-5,0,1} - death / alive / travel through pipe
+		if(reward == 1):
+			self.currentPoints += 1
 
-       #if reward > 0 or reward == -5:
-       self.updateQValues(reward)
+		playerY = observation['player_y']
+		nextPipeBottomY = observation['next_pipe_bottom_y']
+		#both of the below values are rounded to the nearest 10 to reduce the state space
+		# vertical difference between player and bottom pipe
+		vDiff = self.roundup(playerY - nextPipeBottomY)
+		# horizontal distance from next pipe
+		hDiff = self.roundup(observation['next_pipe_dist_to_player'])
+		# Get current state
+		self.lastState = self.currentState
+		# Store last action/state and current state
+		self.currentState = str(hDiff) + '_' + str(vDiff)
 
-       if reward > 0:
-        print "SUCCESS b"
+		#update the q values of the last state-action
+		self.updateQValues(reward)
 
-       # Next pipe bottom y
-       nextPipeBottomY = observation['next_pipe_bottom_y']
-
-       # vertical difference between player and bottom pipe
-       vDiff = int(round(int(playerY - nextPipeBottomY),-1)+500)/10
-
-       # horizontal distance from next pipe
-       hDiff = int(round(int(observation['next_pipe_dist_to_player']),-1))/10
-
-       # Get current state
-       state = self.qValues[vDiff][hDiff]
-
-       # Store last action/state and current state
-       self.moves.append([self.lastAction, self.lastState, state])
-       self.lastState = state
-
-       if (state.qValueJump > state.qValueFall):
-        self.lastAction = 0
-        print "JUMP"
-        return 0
-       elif (state.qValueJump < state.qValueFall):
-        self.lastAction = 1
-        print "FALL"
-        return 1
-       else:
-        randAct = self.action_space.sample()
-        self.lastAction = randAct
-        return randAct
+		#if the q value for a given state and a fly action is greater than the q value of the same
+		#state and a down action, select the fly action
+		if (self.qValues[self.currentState][0] > self.qValues[self.currentState][1]):
+			self.lastAction = 0
+			return 0
+		#opposite if the above condition
+		elif (self.qValues[self.currentState][0] < self.qValues[self.currentState][1]):
+			self.lastAction = 1
+			return 1
+		#if there's is a tie, take a random action
+		else:
+			randAct = self.action_space.sample()
+			self.lastAction = randAct
+			return randAct
 
     def updateQValues(self, rewardValue):
-        #Update Q Values from stored history
-        previousMoves = list(reversed(self.moves))
+        #Update Q Values for the last state-action pair
+        # q learning 
+       
+        lastAction = self.lastAction
+        prevState = self.lastState
+        currentState = self.currentState
 
+        #print ('last state: ' + prevState + ' current state: ' + currentState)
+        #Q(S,A) = Q(S,A) + lr * ( R + dis + max(Q(S',A)) - Q(S,A) )
+        self.qValues[prevState][lastAction] = self.qValues[prevState][lastAction] + (self.lr * ( rewardValue + self.discount * max(self.qValues[currentState]) - self.qValues[prevState][lastAction]) )
 
-        # q learning
-        t = 1
-        for move in previousMoves:
-            action = move[0]
-            prevState = move[1]
-            state = move[2]
-
-
-            #Flag if the bird died in the top pipe
-            high_death_flag = True if self.playerY < 0 else False
-            #if high_death_flag:
-                # print "HIGH DEATH"
-
-
-            if (action == 0):
-                self.qValues[prevState.i][prevState.j].qValueJump = (self.qValues[prevState.i][prevState.j].qValueJump) + ((self.lr) * ( rewardValue + (self.discount) * max(self.qValues[state.i][state.j].qValueFall,self.qValues[state.i][state.j].qValueJump) - self.qValues[prevState.i][prevState.j].qValueJump))
-            else:
-                self.qValues[prevState.i][prevState.j].qValueFall = (self.qValues[prevState.i][prevState.j].qValueFall) + ((self.lr) * ( rewardValue + (self.discount) * max(self.qValues[state.i][state.j].qValueFall,self.qValues[state.i][state.j].qValueJump) - self.qValues[prevState.i][prevState.j].qValueFall))
-
-
-        #for row in self.qValues:
-         #   for cell in row:
-          #      if(cell.qValueFall != 0.0 or cell.qValueJump != 0.0):
-                    #print str(cell.i) + ",,,,," + str(cell.j)
-                    #print "[ Fall: "+str(cell.qValueFall)+", Jump: "+str(cell.qValueJump)+"]"       
-
-
+    #intialise q-values to 0
+    def initialiseQValues(self):
+    	#the horizontal distance (x) is bounded from 0 to 300
+    	#the vertical distance (y) is bounded from -500 to 500
+    	#in order to reduce the state space, the distances are rounded tp the nearest
+    	#ten (i.e a horizontal distance of 116 gets rounded to 120)
+    	for x in range(0,300,10):
+	    	for y in range(-500,500,10):
+	        	self.qValues[str(x)+'_'+str(y)] = [0,0]
 
 
 if __name__ == '__main__':
-    # You can set the level to logging.DEBUG or logging.WARN if you
-    # want to change the amount of output.
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+	#variables for plotting
+	score = []
+	# You can set the level to logging.DEBUG or logging.WARN if you
+	# want to change the amount of output.
+	logger = logging.getLogger()
+	logger.setLevel(logging.INFO)
 
+	env = gym.make('FlappyBird-v0' if len(sys.argv)<2 else sys.arinit_arrygv[1])
 
-    
-    env = gym.make('FlappyBird-v0' if len(sys.argv)<2 else sys.arinit_arrygv[1])
+	outdir = '/tmp/random-agent-results'
+	#uncomment below to upload to openAI gym
+	#env = wrappers.Monitor(env, directory=outdir, force=True)
+	env.seed(0)
+	agent = FlappyAgent(env.action_space)
 
-    with open('data.json') as data_file:    
-        data = json.load(data_file)
+	agent.initialiseQValues()
 
-    print data[15]
+	episode_count = 5000
+	max_steps = 400
+	reward = 0
+	done = False
 
+	for i in range(episode_count):
 
-    # You provide the directory to write to (can be an existing
-    # directory, including one with existing data -- all monitor files
-    # will be namespaced). You can also dump to a tempdir if you'd
-    # like: tempfile.mkdtemp().
-    outdir = '/tmp/random-agent-results'
-    env = wrappers.Monitor(env, directory=outdir, force=True)
-    env.seed(0)
-    agent = RandomAgent(env.action_space)
-    #agent.qValues = [[State() for j in range(500)] for i in range(500)]
-    agent.qValues = [[State(int(round(i))/10,int(round(j))/10) for j in range(500)] for i in range(1000)]
+		#let us know when 250 episodes have completed
+		if i%250 == 0:
+			print str(i)
+		ob = env.reset()
 
-    # learning_iterations_count = 100
-    episode_count = 10000
-    max_steps = 200
-    reward = 0
-    done = False
+		for j in range(max_steps):
+			if i == episode_count-1:
+			    env.render()
+			action = agent.act(ob, reward, done)
+			ob, reward, done, _ = env.step(action)
+			if done:
+			    break
 
-    for i in range(episode_count):
-        successCount = 0
-        if(i%250==0):
-            print i
-        ob = env.reset()
-        # print(ob)
-        for j in range(max_steps):
-            if i == episode_count-1:
-                env.render()
-            action = agent.act(ob, reward, done, False)
-            if(reward > 0):
-                #env.render()
-                successCount = successCount+1
-                #print "success #" + str(successCount)
-            ob, reward, done, _ = env.step(action)
-            # print(env.action_space.__repr__())
-            if done:
-                break
-            # Note there's no env.render() here. But the environment still can open window and
-            # render if asked by env.monitor: it calls env.render('rgb_array') to record video.
-            # Video is not recorded every episode, see capped_cubic_video_schedule for details.
+		score.append(agent.currentPoints)
+		#reset the score for the next episode
+		agent.currentPoints = 0
 
-    # Close the env and write monitor result info to disk
-    env.close()
+	# Close the env and write monitor result info to disk
+	env.close()
 
+	logger.info("Successfully ran RandomAgent. Now trying to upload results to the scoreboard. If it breaks, you can always just try re-uploading the same results.")
 
+	# uncomment to upload openAi Gym
+	# gym.scoreboard.api_key = "sk_3qlTNVYeSq5H6cCDbF6Q"
+	# gym.upload(outdir)
 
-    #ob = State(0,0)
-    #json_string=""
-    #for row in agent.qValues:
-     # for cell in row:
-      #  if cell.vDiff%10==0 && cell.hDiff%10==0
-           # json_string += str(cell.dump()) + ","
-
-
-    #with open('data.json', 'w') as outfile:
-    #    json.dump(json_string, outfile)
-
-    # Upload to the scoreboard. We could also do this from another
-    # process if we wanted.
-    logger.info("Successfully ran RandomAgent. Now trying to upload results to the scoreboard. If it breaks, you can always just try re-uploading the same results.")
-    gym.scoreboard.api_key = "sk_3qlTNVYeSq5H6cCDbF6Q"
-    gym.upload(outdir)
+	#plot the score vs episode
+	plt.plot(score, 'ro')
+	plt.axis([0, episode_count, 0, 5])
+	plt.xlabel('Episode Number')
+	plt.ylabel('Score')
+	plt.show()
